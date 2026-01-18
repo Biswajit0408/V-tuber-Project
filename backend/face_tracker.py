@@ -1,8 +1,16 @@
 import cv2
 import mediapipe as mp
+import math
 
 # ----------------------------
-# MediaPipe Face Mesh setup
+# Utility functions
+# ----------------------------
+def distance(p1, p2):
+    return math.hypot(p2[0] - p1[0], p2[1] - p1[1])
+
+
+# ----------------------------
+# MediaPipe setup
 # ----------------------------
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(
@@ -14,52 +22,65 @@ face_mesh = mp_face_mesh.FaceMesh(
 )
 
 # ----------------------------
-# Open webcam (Windows-safe)
+# Webcam
 # ----------------------------
 cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+WINDOW_NAME = "VTuber Face Tracking - Phase 2"
+cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
 
 if not cap.isOpened():
-    raise RuntimeError("❌ Could not open webcam")
-
-WINDOW_NAME = "VTuber Face Tracking - Phase 1"
+    raise RuntimeError("Could not open webcam")
 
 # ----------------------------
 # Main loop
 # ----------------------------
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        print("❌ Failed to read frame")
-        break
+try:
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
 
-    # Convert BGR → RGB for MediaPipe
-    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    result = face_mesh.process(rgb)
+        h, w, _ = frame.shape
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        result = face_mesh.process(rgb)
 
-    # Draw face landmarks
-    if result.multi_face_landmarks:
-        for face_landmarks in result.multi_face_landmarks:
-            h, w, _ = frame.shape
-            for lm in face_landmarks.landmark:
-                x = int(lm.x * w)
-                y = int(lm.y * h)
-                cv2.circle(frame, (x, y), 1, (0, 255, 0), -1)
+        if result.multi_face_landmarks:
+            landmarks = result.multi_face_landmarks[0].landmark
+            points = [(int(lm.x * w), int(lm.y * h)) for lm in landmarks]
 
-    # Show output
-    cv2.imshow(WINDOW_NAME, frame)
+            # Eye distances
+            left_eye = distance(points[159], points[145])
+            right_eye = distance(points[386], points[374])
 
-    # Keyboard exit (ESC)
-    key = cv2.waitKey(1) & 0xFF
-    if key == 27:
-        break
+            # Mouth open
+            mouth_open = distance(points[13], points[14])
 
-    # Window close (X)
-    if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_VISIBLE) < 1:
-        break
+            # Head yaw
+            nose_x = points[1][0]
+            left_face = points[234][0]
+            right_face = points[454][0]
+            face_center = (left_face + right_face) // 2
+            head_yaw = nose_x - face_center
 
-# ----------------------------
-# Cleanup
-# ----------------------------
-cap.release()
-cv2.destroyAllWindows()
-print("✅ Camera released cleanly")
+            # Display values
+            cv2.putText(frame, f"Left Eye: {left_eye:.2f}", (20, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(frame, f"Right Eye: {right_eye:.2f}", (20, 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(frame, f"Mouth Open: {mouth_open:.2f}", (20, 90),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(frame, f"Head Yaw: {head_yaw}", (20, 120),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+        cv2.imshow(WINDOW_NAME, frame)
+
+        if cv2.waitKey(1) & 0xFF == 27:
+            break
+
+except KeyboardInterrupt:
+    print("Interrupted by user")
+
+finally:
+    cap.release()
+    cv2.destroyAllWindows()
+    print("Camera released cleanly")
